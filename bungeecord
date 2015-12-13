@@ -1,0 +1,100 @@
+#!/bin/bash
+BUNGEECORD_HOME="/opt/bungeecord"
+BUNGEECORD_SRC="/usr/src/bungeecord"
+BUNGEECORD_OPTS=${BUNGEECORD_OPTS:-"-server -Xmx1024m -XX:MaxPermSize=256m -XX:+UseParNewGC -XX:+UseConcMarkSweepGC"}
+
+BUNGEECORD_URL_BASE="http://ci.md-5.net/job/BungeeCord"
+BUNGEECORD_URL_TARGET_PATH="artifact/bootstrap/target/BungeeCord.jar"
+
+if [ -z "$BUNGEECORD_VERSION" ]; then
+    BUNGEECORD_VERSION=latest
+    BUNGEECORD_URL="$BUNGEECORD_URL_BASE/lastSuccessfulBuild/$BUNGEECORD_URL_TARGET_PATH"
+else
+    BUNGEECORD_URL="$BUNGEECORD_URL_BASE/$BUNGEECORD_VERSION/$BUNGEECORD_URL_TARGET_PATH"
+fi
+
+BUNGEECORD_JAR="BungeeCord-$BUNGEECORD_VERSION.jar"
+TMUX_SESSION=bungeecord
+
+download_server() {
+
+    # Download BungeeCord if it does not exist
+    if [ ! -f "$BUNGEECORD_HOME/$BUNGEECORD_JAR" ]; then
+        echo "Downloading BungeeCord. Selected version: $BUNGEECORD_VERSION"
+        wget -O "$BUNGEECORD_HOME/$BUNGEECORD_JAR" "$BUNGEECORD_URL"
+
+        if [ $? -ne 0 ]; then
+            >&2 echo "Unable to download BungeeCord."
+            >&2 echo "Make sure you specified the correct version via the BUNGEECORD_VERSION variable."
+            exit 1
+        fi
+    fi
+}
+
+first_run() {
+    # Sync files from $BUNGEECORD_SRC to $BUNGEECORD_HOME. Do this on container's first run.
+    if [ -f "/run/first_time" ]; then
+        # Ensure that only the relevant plugins are enabled on the server.
+        mkdir -p $BUNGEECORD_HOME/plugins
+        rm $BUNGEECORD_HOME/plugins/*.jar*
+
+        rsync -avh --exclude '/world*' $BUNGEECORD_SRC/ $BUNGEECORD_HOME
+        rm /run/first_time
+    fi
+}
+
+update_permissions() {
+    echo "Updating file permissions"
+    chown -R bungeecord:bungeecord $BUNGEECORD_HOME
+}
+
+run_bungeecord() {
+    echo "TERM is set to $TERM"
+    pushd $BUNGEECORD_HOME > /dev/null
+    echo "Running BungeeCord"
+    echo "BUNGEECORD_OPTS: $BUNGEECORD_OPTS"
+
+    BUNGEECORD_COMMAND="gosu bungeecord java $BUNGEECORD_OPTS -jar $BUNGEECORD_HOME/$BUNGEECORD_JAR"
+    PARAMS=$@
+
+    echo "Extra parameters: ${PARAMS[@]}"
+    BUNGEECORD_COMMAND="$BUNGEECORD_COMMAND ${PARAMS[@]}"
+
+    if [ "$TERM" == "dumb" ]; then
+        >&2 echo "WARNING! Dumb term detected. You won't be able to execute console commands via docker!"
+        exec $BUNGEECORD_COMMAND
+    else
+        tmux new -s $TMUX_SESSION "$BUNGEECORD_COMMAND"
+    fi
+}
+
+console_command() {
+    COMMAND=$@
+    if [ "$TERM" == "dumb" ]; then
+        >&2 echo "Console command not supported on a dumb term."
+        exit 1
+    else
+        echo "Executing console command: ${COMMAND[@]}"
+        tmux send -t $TMUX_SESSION "${COMMAND[@]}" ENTER
+    fi
+}
+
+case "$1" in
+    run)
+        shift 1
+        download_server
+        first_run
+        update_permissions
+        run_bungeecord $@
+        ;;
+    permissions)
+        shift 1
+        update_permissions
+        ;;
+    console)
+        shift 1
+        console_command $@
+        ;;
+    *)
+        exec "$@"
+esac
