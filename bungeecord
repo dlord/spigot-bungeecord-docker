@@ -79,12 +79,24 @@ console_command() {
     fi
 }
 
+safe_shutdown() {
+    COMMAND=$@
+    if [ "$TERM" == "dumb" ]; then
+        echo "Performing a force shutdown on a dumb term."
+        exit 0
+    else
+        echo "Shutting down server."
+        tmux send -t $TMUX_SESSION C-c
+    fi
+}
+
 case "$1" in
     run)
         shift 1
         download_server
         first_run
         update_permissions
+        trap safe_shutdown EXIT
         run_bungeecord $@
         ;;
     permissions)
