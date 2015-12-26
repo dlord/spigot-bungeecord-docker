@@ -75,7 +75,8 @@ console_command() {
         exit 1
     else
         echo "Executing console command: ${COMMAND[@]}"
-        tmux send -t $TMUX_SESSION "${COMMAND[@]}" ENTER
+        tmux send -t $TMUX_SESSION -l "${COMMAND[@]}"
+        tmux send -t $TMUX_SESSION ENTER
     fi
 }
 
