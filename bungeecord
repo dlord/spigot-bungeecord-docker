@@ -86,7 +86,7 @@ safe_shutdown() {
         exit 0
     else
         echo "Shutting down server."
-        tmux send -t $TMUX_SESSION C-c
+        console_command end
     fi
 }
 
